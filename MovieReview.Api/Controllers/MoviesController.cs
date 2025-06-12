@@ -1,45 +1,86 @@
 ﻿using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using MovieReview.Api.Data;
+using MovieReview.Api.DTOs;
+using MovieReview.Api.Entities;
+using MovieReview.Api.Repositories;
 
-[Route("api/[controller]")]
-[ApiController]
-public class MoviesController : ControllerBase
+namespace MovieReview.Api.Controllers
 {
-    private readonly ApiDbContext _context;
-
-    public MoviesController(ApiDbContext context)
+    [Route("api/[controller]")]
+    [ApiController]
+    public class MoviesController : ControllerBase
     {
-        _context = context;
-    }
+        private readonly IMovieRepository _movieRepository;
+        private readonly IGenreRepository _genreRepository;
+        private readonly Data.ApiDbContext _context; // SaveChanges için geçici olarak kullanıyoruz.
 
-    // GET: api/movies
-    [HttpGet]
-    public async Task<IActionResult> GetMovies()
-    {
-        // İlişkili verileri de getirmek için .Include() kullanıyoruz.
-        var movies = await _context.Movies
-            .Include(m => m.Genres) // Her filmin Türler (Genres) bilgisini de sorguya dahil et.
-            .Include(m => m.Reviews) // Her filmin Değerlendirme (Reviews) bilgisini de dahil et.
-            .ToListAsync();
-
-        return Ok(movies);
-    }
-
-    // GET: api/movies/1
-    [HttpGet("{id}")]
-    public async Task<IActionResult> GetMovieById(int id)
-    {
-        var movie = await _context.Movies
-            .Include(m => m.Genres)
-            .Include(m => m.Reviews)
-            .FirstOrDefaultAsync(m => m.Id == id);
-
-        if (movie == null)
+        public MoviesController(IMovieRepository movieRepository, IGenreRepository genreRepository, Data.ApiDbContext context)
         {
-            return NotFound(); // Film bulunamazsa 404 hatası döndür.
+            _movieRepository = movieRepository;
+            _genreRepository = genreRepository;
+            _context = context;
         }
 
-        return Ok(movie);
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<MovieDetailDto>>> GetMovies()
+        {
+            var movies = await _movieRepository.GetAllAsync();
+
+            var movieDtos = movies.Select(m => new MovieDetailDto
+            {
+                Id = m.Id,
+                Title = m.Title,
+                ReleaseYear = m.ReleaseYear,
+                Director = m.Director,
+                AverageRating = m.AverageRating,
+                Genres = m.Genres.Select(g => new GenreDto { Id = g.Id, Name = g.Name }).ToList(),
+                Reviews = m.Reviews.Select(r => new ReviewDto { Id = r.Id, ReviewerName = r.ReviewerName, Rating = r.Rating, Comment = r.Comment, ReviewDate = r.ReviewDate }).ToList()
+            });
+
+            return Ok(movieDtos);
+        }
+
+        [HttpGet("{id}")]
+        public async Task<ActionResult<MovieDetailDto>> GetMovieById(int id)
+        {
+            var movie = await _movieRepository.GetByIdAsync(id);
+
+            if (movie == null)
+            {
+                return NotFound();
+            }
+
+            var movieDto = new MovieDetailDto
+            {
+                Id = movie.Id,
+                Title = movie.Title,
+                ReleaseYear = movie.ReleaseYear,
+                Director = movie.Director,
+                AverageRating = movie.AverageRating,
+                Genres = movie.Genres.Select(g => new GenreDto { Id = g.Id, Name = g.Name }).ToList(),
+                Reviews = movie.Reviews.Select(r => new ReviewDto { Id = r.Id, ReviewerName = r.ReviewerName, Rating = r.Rating, Comment = r.Comment, ReviewDate = r.ReviewDate }).ToList()
+            };
+
+            return Ok(movieDto);
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> CreateMovie([FromBody] MovieCreateDto movieDto)
+        {
+            var genres = await _genreRepository.GetByIdsAsync(movieDto.GenreIds);
+
+            var movie = new Movie
+            {
+                Title = movieDto.Title,
+                Director = movieDto.Director,
+                ReleaseYear = movieDto.ReleaseYear,
+                AverageRating = 0,
+                Genres = genres.ToList()
+            };
+
+            await _movieRepository.AddAsync(movie);
+            await _context.SaveChangesAsync();
+
+            return CreatedAtAction(nameof(GetMovieById), new { id = movie.Id }, movie);
+        }
     }
 }
