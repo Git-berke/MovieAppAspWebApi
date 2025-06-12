@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using MovieReview.Api.Data;
 
 var builder = WebApplication.CreateBuilder(args);
 
